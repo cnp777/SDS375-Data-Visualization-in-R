@@ -1,0 +1,238 @@
+---
+title: "Project 3"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(colorspace)
+library(broom)
+library(scales)
+library(gridExtra)
+library(patchwork)
+library(ggiraph)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+*Clara Torslov (ct32699)*
+
+This is the data set used in this project:
+
+```{r message = FALSE}
+movies <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-03-09/movies.csv', na = c("", "NA", "N/A", "#N/A")) %>% dplyr::select(-error)
+```
+
+Link to the dataset: *https://github.com/rfordatascience/tidytuesday/blob/master/data/2021/2021-03-09/readme.md*. 
+
+### **Part 1** 
+
+**Question:** Looking only at movies between 1990 and 2010, is there a noticeable difference between the movies who passed and failed the Bechdel test? Is there a difference in trend throughout the years? 
+
+**Introduction:** We are working with the data set, `movies`, which contains characteristics surrounding movies in the period 1970-2013. Each row in the data set corresponds to a movie and the columns represent different information about that movie. More information about the data set can be found at https://github.com/rfordatascience/tidytuesday/blob/master/data/2021/2021-03-09/readme.md. 
+
+Throughout part 1 we consider the variables `year`, `binary`, `imdb_rating`, `budget` and `intgross`. The variable `binary` is a binary pass/fail indication of the Bechdel test. A quote describing the test, is stated below. The variable `imdb_rating` states the IMDB rating that the movie has received on a scale of 0 to 10. `budget` states the budget of the movie and `intgross` states the international gross of the movie obtained in the release year. 
+
+*"Bechdel said that if a movie can satisfy three criteria — there are at least two named women in the picture, they have a conversation with each other at some point, and that conversation isn’t about a male character — then it passes “The Rule,” whereby female characters are allocated a bare minimum of depth."*  - https://fivethirtyeight.com/features/the-dollar-and-cents-case-against-hollywoods-exclusion-of-women/}{FiveThirtyEight
+
+**Approach:** To answer the first part of this question we wish to perform data wrangling to create an informative summary table of the data set. We wish to use dplyr functions `filter()` to only consider the two specific decades and `select()` to only consider the specific columns. Then we wish to use a combination of dplyr functions `group_by()` and `summarize()` to create summary statistics for four groups: all movies that passed or failed the test in the 1990s and all movies that passed or failed the test in the 2000s. For these four groups we wish to compute the mean of the IMDB score, the budget and the international gross, along with a count of how many movies are in each group. 
+
+Then to examine the development we wish to plot the budget throughout the years for two groups of movies: the ones that passed the Bechdel test and the ones who failed. We wish to plot this with a standard regression line and with a de-trended regression line. We detrend by differencing, meaning each observation is the difference between itself and the previous observation, this way we remove a potential overall downward or upward trend caused by fx. inflation. 
+
+**Analysis:** First we wrangle our data set, to turn the columns into the right types and make new variables if necessary. 
+```{r }
+movies_factor <- movies  %>% 
+  na.omit() %>% # removes years 1970-1989
+  mutate(
+    binary = as.factor(binary),
+    decade_code = as.factor(decade_code),
+    period_code = as.factor(period_code),
+    clean_test = as.factor(clean_test),
+    clean_test = fct_relevel(clean_test, "ok", "dubious", "men", "notalk", "nowomen"), 
+    imdb_rating_group = case_when(
+      imdb_rating < 3  ~ "2",
+      imdb_rating >= 3 & imdb_rating < 4  ~ "3",
+      imdb_rating >= 4 & imdb_rating < 5  ~ "4",
+      imdb_rating >= 5 & imdb_rating < 6  ~ "5",
+      imdb_rating >= 6 & imdb_rating < 7  ~ "6",
+      imdb_rating >= 7 & imdb_rating < 8  ~ "7",
+      imdb_rating >= 8  ~ "8+",
+    ),
+    Good = ifelse(imdb_rating > 6, "1", "0"),
+    runtime = as.numeric(gsub(" min","", runtime))
+  )
+```
+
+We perform data wrangling to create a summary table.
+```{r }
+movies_factor %>% 
+ filter(decade_code == 1 | decade_code == 2) %>% 
+  dplyr::select(binary, imdb_rating, budget, decade_code, intgross) %>% 
+  group_by(binary, decade_code) %>% 
+  summarize(
+    Mean_IMDB_Score = mean(imdb_rating),
+    Mean_budget = mean(budget),
+    Mean_intgross = mean(intgross),
+    Count = n()
+  )
+```
+
+We make a scatter plot with two linear regression lines, one standard lm and one de-trended.
+```{r }
+movies_factor %>% 
+  mutate(
+    year = as.numeric(year),
+    budget_diff = diff(c(movies_factor$budget[1],movies_factor$budget)),
+    binary = recode(binary, "FAIL" = "Failed", "PASS" = "Passed")
+  ) %>% 
+  ggplot() +
+  aes(x = year, y = budget, color = binary) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F, formula = 'y ~ x') +
+  geom_smooth(aes(x = year, y = budget_diff), color = "black", method = "lm", se = F, formula = 'y ~ x') +
+  facet_wrap(vars(binary)) +
+  theme_bw() +
+  scale_y_continuous(name = "Movie Budget",
+                     labels = label_number(suffix = " M", scale = 1e-6)) +
+  scale_x_continuous(name = "Release Year") +
+  guides(color = guide_legend("Bechdel Test"))
+```
+
+**Discussion:** From the summary table we see a clear difference between the group of movies that passed the Bechdel test and the ones that did not. The difference can be seen across all categories, where the group of movies that failed the Bechdel test on average is larger, has larger budgets and earns a higher international gross and IMDB score (when compared to the group of movies that passed the test and is from the same decade). 
+
+This pattern clearly continuous in the next plot. From the de-trended regression line it can be seen how the increase in budget among the movies that failed the Bechdel test is going (slightly) up, whereas it visibly decreases among the movies that passed the Bechdel test. So in conclusion we see a decreasing investment in movies which includes *"female characters with a bare minimum of depth"*. 
+
+### **Part 2**
+
+**Question:** Is there a distinction between good and bad movies made in the US? 
+
+**Introduction:** We are still working with the `movies` data set. To answer this question we wish to do cluster analysis. This means that we consider all the numerical variables. We wish to examine whether the good and bad movies cluster together. We define a good movie based on whether it has received an imdb rating above or below 6. We will create a new variable called `Good`, based on the variable `imdb_rating`. We will further use the variable `domgross`, which states the domestic gross of the movie obtained in the release year, and `metascore`, which ranges from 0 to 100 and is a weighted average of many reviews from a large group of the world's most respected movie critics.  
+
+**Approach:** We wish to start by doing principal component analysis, to examine whether or not there is clusters in the data. If there is we wish to examine what characterizes these clusters and proceed with cluster analysis, using k-means clustering. When doing so we will first examine the optimal number of means with an elbow plot (the code for this will be provided, however not the actual visualization). Next, we wish to do a scatter plot of (`metascore`,`domgross`), where each point will be colored by the cluster group and shaped by whether it is a good movie or not. We wish to highlight the potential difference or equality between these two by using ellipses.   
+
+**Analysis:**
+
+We start by doing principal components analysis. We make sure to filter out movies not made entirely in the US and the variable `imdb_rating` (as we wish to examine a grouped version of this). Further, we make sure to standardize all variables to zero mean and unit variance, before doing PCA. Then, we project the original data into the principal components space, to create the scatterplot we wished for. We plot this next to the rotation matrix plot, which links the individual movies to the features in the data set. 
+
+```{r }
+movies_cluster <- movies_factor %>% 
+filter(str_detect(country, "^[USA]+$")) %>% 
+  filter(year != 2013) %>% 
+  dplyr::select(-budget_2013, -domgross_2013, -intgross_2013, -imdb_rating)
+
+movies_pca <- movies_cluster %>% 
+  dplyr::select(where(is.numeric)) %>% 
+  scale() %>%                  
+  prcomp() 
+
+# Scatter plot
+scatter2 <- movies_pca %>% 
+  augment(movies_cluster)  %>%
+  mutate(Good = recode(Good, "0" = "No", "1" = "Yes"),
+         Good = fct_relevel(Good, "Yes", "No")) %>%
+  ggplot(aes(.fittedPC1, .fittedPC2)) +
+  geom_point(aes(color = Good)) +
+  theme_bw(14) +
+  scale_x_continuous(name = "PC1") +
+  scale_y_continuous(name = "PC2") +
+  scale_color_brewer(type = "qual") +
+  geom_point_interactive(
+    aes(color = Good,
+        tooltip = glue::glue("{title}"),
+        data_id = 1:nrow(movies_cluster)
+  ))
+
+# Rotation matrix plot
+arrow_style <- arrow(
+  angle = 20, length = grid::unit(5, "pt"),
+  ends = "first", type = "closed"
+)
+
+ rotation <- movies_pca %>%
+  tidy(matrix = "rotation") %>%
+  pivot_wider(
+    names_from = "PC", values_from = "value",
+    names_prefix = "PC"
+  ) %>%
+  ggplot(aes(PC1, PC2)) +
+  geom_segment(
+    xend = 0, yend = 0,
+    arrow = arrow_style
+  ) +
+  geom_text(aes(label = column), hjust = -0.1, color = "red", size = 2) +
+  xlim(-0.3, 0.75) + 
+  ylim(-0.6, 0.5) + 
+  coord_fixed() +
+  theme_bw(14)
+
+girafe(
+  ggobj = (scatter2 | rotation),
+  width_svg = 6,
+  height_svg = 6*0.618
+)
+```
+
+
+We see two clusters and perform k-means clustering.
+```{r}
+# Elbow plot
+calc_withinss <- function(data, centers) {
+  km_fit <- select(data, where(is.numeric)) %>%
+    kmeans(centers = centers, nstart = 10)
+  km_fit$tot.withinss
+}
+elbow_plot <- tibble(centers = 1:15) %>%
+  mutate(within_sum_squares = map_dbl(centers, ~ calc_withinss(movies_cluster, .x))) %>%
+  ggplot() +
+  aes(centers, within_sum_squares) +
+  geom_point() +
+  geom_line()
+
+# K-means clustering
+set.seed(11)
+movies_knn <- movies_cluster %>%
+  dplyr::select(where(is.numeric)) %>%
+  kmeans(centers = 3,
+         nstart = 100)
+
+# Plot
+movies_knn %>%
+  augment(movies_cluster) %>%
+  mutate(Good = recode(Good, "0" = "No", "1" = "Yes"),
+         Good = fct_relevel(Good, "Yes", "No")) %>%
+  ggplot() +
+  aes(x = metascore, y = domgross) +
+  geom_point(aes(color = .cluster, shape = Good)) +
+  scale_color_brewer(type = "qual") +
+  theme_bw() +
+  scale_shape_manual(name = "Good movie?",
+                     values = c(21, 24)) +
+  labs(color = "Cluster") +
+  scale_x_continuous(name = "Metascore") +
+  scale_y_continuous(name = "Domestic Gross",
+                     labels = label_number(
+                       prefix = "$",
+                       suffix = " M",
+                       scale = 1e-6
+                     )) +
+  stat_ellipse(aes(shape = Good), color = "black", level = 0.8) +
+  stat_ellipse(aes(color = .cluster), level = 0.8) +
+  theme(legend.text = element_text(color = "black"))
+```
+
+
+**Discussion:** From the principal components scatter plot (left) we see a clear clustering of the "good" and "bad" movies. The cluster of "bad" movies seem to be concentrated in the upper left quadrant. We see a slight overlap between the clusters of "good" and "bad" movies. The cluster consisting of "good" movies are more scattered and stretches in different directions across both the first and second principal component, however the largest concentration is seen in the lower left quadrant. When we compare with the plot of the rotation matrix (right) we see that the "bad" movies are negatively correlated with `metascore`, `runtime` and `imdb_votes` in the PC2 direction and negatively correlated with `budget`, `intgross` and `domgross` in the PC1 direction. In other words a bad movie will have a low metascore, low runtime, low number of imdb votes, a low budget and low international and domestic gross. The cluster of the "good" movies seem more scattered, however clearly gravitating towards a higher metascore and higher budget and gross. 
+
+From the scatter plot we furhter spot some outliers. Due to the interactive feature we can see the movie titles of each indivial point. The movies that (according to PCA) have the highest Metascore, is Shawshank Redemption and Pulp Fiction. Anyone who has ever seen these movies knows that this is the truth. We see another outlier, which (by comparing to the right plot) is a movie which earned a crazy high international and domestic gross. This movie is Titanic, which again seems very reasonable. 
+
+From the last, k-means clustering, plot we see that the algorithm does not do a good job. The two black ellipses shows (with $80\%$ level) the "true" clusters of "good" and "bad" movies. These do not compare to the cluster ellipses. It looks as if the k-means clustering algorithm, has not clustered based on the quality of the movie, but rather based on the domestic gross. 
+
+
+
+
+
+
+
+
+
